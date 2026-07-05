@@ -1,0 +1,173 @@
+<!--
+  index.html （GitHub Pages用）
+
+  ★このファイルを使う前に、下の APPS_SCRIPT_URL の値を
+    自分のApps ScriptウェブアプリURLに書き換えてください★
+
+  対応: Android + Chrome（音声認識・音声合成が動きます）
+  ※ iPhone Safariは音声認識APIが使えないため、iPhoneはSiriショートカットで運用してください。
+
+  使い方:
+  - このページのURL単体で開くと「開始」ボタンが出ます（初回はマイク許可のためタップが必要）
+  - URLの末尾に ?auto=1 を付けて開くと、許可済みなら自動でスタートします
+    （Googleアシスタントのカスタムルーティンで「このURLを開く」を設定すればハンズフリー起動）
+-->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: sans-serif; background:#fdf6e3; margin:0; padding:24px; text-align:center; }
+  h1 { font-size:20px; color:#5c3d00; }
+  #status { font-size:18px; margin:20px 0; min-height:60px; color:#333; }
+  #transcript { font-size:22px; font-weight:bold; color:#8a5300; min-height:40px; }
+  button { font-size:18px; padding:14px 28px; border-radius:8px; border:none; background:#e6a817; color:#fff; margin-top:20px; }
+  #log { text-align:left; margin-top:30px; font-size:13px; color:#666; max-height:200px; overflow:auto; background:#fff; padding:10px; border-radius:8px; }
+  .field { margin:4px 0; }
+</style>
+</head>
+<body>
+  <h1>🐝 内検記録（音声入力）</h1>
+  <div id="status">準備中...</div>
+  <div id="transcript"></div>
+  <button id="startBtn" onclick="startFlow()">開始する</button>
+  <div id="log"></div>
+
+<script>
+// ↓↓↓ ここを自分のApps ScriptウェブアプリURLに書き換えてください ↓↓↓
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwuen_L7Ci22a6HswA0aIJkEFo8ruT45G3teO7TtVcLtb3P9FQs7wFkHf1FqemAFI72mw/exec';
+// ↑↑↑ ここを自分のApps ScriptウェブアプリURLに書き換えてください ↑↑↑
+
+const FIELDS = [
+  { key: '記録者',        prompt: '記録者の名前を教えてください' },
+  { key: '群番号',        prompt: '群番号を教えてください' },
+  { key: '天候',          prompt: '今日の天候は？' },
+  { key: '気温',          prompt: '気温は何度ですか' },
+  { key: '女王蜂確認',    prompt: '女王蜂は確認できましたか' },
+  { key: '産卵状況',      prompt: '産卵状況はどうですか' },
+  { key: '蜂児パターン',  prompt: '蜂児パターンはどうですか' },
+  { key: 'ダニ数',        prompt: 'ダニの数はどうでしたか' },
+  { key: '貯蜜量',        prompt: '貯蜜量はどうですか' },
+  { key: '花粉量',        prompt: '花粉量はどうですか' },
+  { key: '分蜂兆候(王台)', prompt: '王台など分蜂の兆候はありましたか' },
+  { key: '給餌',          prompt: '給餌は行いましたか' },
+  { key: '病気兆候',      prompt: '病気の兆候はありましたか' },
+  { key: '特記事項',      prompt: 'その他、特記事項があれば教えてください。なければ「なし」と言ってください' }
+];
+
+let idx = 0;
+let answers = {};
+let recognition;
+const statusEl = document.getElementById('status');
+const transcriptEl = document.getElementById('transcript');
+const logEl = document.getElementById('log');
+const startBtn = document.getElementById('startBtn');
+
+function speak(text, onEnd) {
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'ja-JP';
+  u.rate = 1.3; // 読み上げ速度（1.0が標準。数値を上げると速くなります）
+  u.onend = onEnd || function(){};
+  speechSynthesis.speak(u);
+}
+
+function listenOnce(onResult, onError) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    statusEl.textContent = 'このブラウザは音声認識に対応していません（Android Chromeを使ってください）';
+    return;
+  }
+  recognition = new SR();
+  recognition.lang = 'ja-JP';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.onresult = function (e) {
+    onResult(e.results[0][0].transcript);
+  };
+  recognition.onerror = function (e) {
+    if (onError) onError(e);
+  };
+  recognition.start();
+}
+
+function askNext() {
+  if (idx >= FIELDS.length) {
+    confirmAndSubmit();
+    return;
+  }
+  const field = FIELDS[idx];
+  statusEl.textContent = field.prompt;
+  transcriptEl.textContent = '';
+  speak(field.prompt, function () {
+    listenOnce(function (text) {
+      transcriptEl.textContent = text;
+      answers[field.key] = text;
+      logEl.innerHTML += '<div class="field">' + field.key + '： ' + text + '</div>';
+      idx++;
+      setTimeout(askNext, 500);
+    }, function () {
+      statusEl.textContent = '聞き取れませんでした。もう一度お願いします。';
+      speak('聞き取れませんでした。もう一度お願いします。', function(){
+        listenOnce(function(text){
+          transcriptEl.textContent = text;
+          answers[field.key] = text;
+          logEl.innerHTML += '<div class="field">' + field.key + '： ' + text + '</div>';
+          idx++;
+          setTimeout(askNext, 500);
+        });
+      });
+    });
+  });
+}
+
+function confirmAndSubmit() {
+  statusEl.textContent = 'この内容で登録します。よろしいですか？「はい」か「いいえ」でお答えください。';
+  speak('この内容で登録します。よろしいですか？', function () {
+    listenOnce(function (text) {
+      if (text.includes('はい')) {
+        statusEl.textContent = '送信中です...';
+        fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(answers)
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (result) {
+            const msg = '登録しました。判定は' + result.alertLabel + 'です。次回内検予定日は' + result.nextDate + 'です。' + result.notes;
+            statusEl.textContent = msg;
+            speak(msg);
+          })
+          .catch(function (err) {
+            statusEl.textContent = '送信しました（結果の読み上げは失敗しましたが、記録自体はできている可能性があります。スプレッドシートをご確認ください）';
+            speak('送信しました。詳しくはスプレッドシートを確認してください');
+          });
+      } else {
+        statusEl.textContent = '登録を中止しました。';
+        speak('登録を中止しました');
+      }
+    });
+  });
+}
+
+function startFlow() {
+  startBtn.style.display = 'none';
+  idx = 0;
+  answers = {};
+  logEl.innerHTML = '';
+  askNext();
+}
+
+// URLに ?auto=1 が付いていれば自動開始（マイク許可済みの場合のみ動作）
+window.onload = function () {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('auto') === '1') {
+    statusEl.textContent = '自動開始します...';
+    startFlow();
+  } else {
+    statusEl.textContent = '「開始する」を押してください（初回のみマイク許可が必要です）';
+  }
+};
+</script>
+</body>
+</html>
